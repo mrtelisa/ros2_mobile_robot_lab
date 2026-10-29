@@ -1,58 +1,102 @@
-# Experimental Laboratory Classes
+# ROS 2 Mobile Robot: Sensors, Perception and Navigation
 
-- This repo contains the package `erl1`
+ROS 2 package (`erl1`) that builds a simulated mobile robot step by step during the lab classes: robot model, sensors, sensor fusion, ArUco marker detection, mapping, localization, navigation and task planning with PDDL. It also contains the first assignment: a node that finds ArUco markers and visits them one by one, tested in simulation and on a real robot.
 
-- The folder `meshes` is cloned from https://github.com/CarmineD8/meshes
+> Lab classes and first assignment of the Experimental Robotics Laboratory course (2nd year, 1st semester), MSc Robotics Engineering, University of Genoa.
 
-- When gps is integrated, to see the robot moving you can run the command  
-`python3 gps_follower.py`   
-in the folder `erl1_sensors`, obtained by cloning the repo previously linked
+<p align="center">
+  <img src="gifs/2wheel.gif" alt="Marker-visiting task in Gazebo" width="49%">
+  <img src="gifs/lab.gif" alt="Marker-visiting task on the real robot" width="49%">
+</p>
 
-- When `lidar` is added, you need to subscribe (in the file spawn_robot.launch.py) to the bridge of the erl1_sensors pkg this two topics:  
-`"/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",`
-`"/scan/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",`  
-It can be visualized in Rviz by adding the topic `/scan`, and in gazebo adding the `Visualize lidar` Tool.
+**Stack:** ROS 2 Jazzy · Gazebo Sim · RViz 2 · `ros_gz` bridge · `robot_localization` · OpenCV / ArUco · Nav2 · PlanSys2
 
-- When substituting the camera with a rgbd one, you need to remove the subscription (in the file spawn_robot.launch.py) to the bridge of the erl1_sensors pkg this two topics:
-`"/camera/image@sensor_msgs/msg/Image@gz.msgs.Image",`
-`"/camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo",`  
-and then add these two new ones:  
-`"/camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image",`
-`"/camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",`
+## Assignment 1: ArUco marker visiting
 
-- To use open_cv, the repo https://github.com/CarmineD8/my_opencv should be cloned as another pkg of the workspace.
-The repo for open_cv in python is instead https://github.com/CarmineD8/my_opencv_py
+The node `scripts/assignment1.py` makes the robot:
+1. rotate on the spot until it has detected every ArUco marker in the scene;
+2. visit the markers in ascending ID order: for each one, rotate until the marker is centred in the camera image, then drive towards it until it is close enough;
+3. publish an image of the marker with a circle drawn around it on `camera/image_with_circle`;
+4. go back to the starting position and move on to the next marker.
 
-- For using aruco_open_cv, I tuned back from a rgbd camera to a normal one. NB: The camera must not be wide angle!  
-It is also necessary to clone this repo https://github.com/SaxionMechatronics/ros2-gazebo-aruco as a new folder at the same level of `my_ros2` workspace, and the repo https://github.com/fictionlab/ros_aruco_opencv as a pkg in `my_ros2`.  
-Then, after starting the simulation   
-(   `colcon build` in the workspace  
-    `source install/local_setup.bashrc`  
-    `ros2 launch elr1 erl1_simulation.launch.py`)  
-in another terminal run  
-`ros2 launch aruco_opencv aruco_tracker.launch.xml`  
-In this way, in the rviz environment, when clicking `Add -> By Topic`, the option `Image` under `/debugging` should be appeared, and it will show the box with the calibration mark with an axes frame.
+The behaviour is a state machine (`STARTING` → `SEARCH_FOR_MARKERS` → `SET_MARKER_GOAL` → `ROTATE_TO_MARKER` → `GO_TO_MARKER` → `ACQUIRE_IMAGE` → `COMING_BACK`), driven by the marker detections (`/aruco_detections`), the odometry (`/odom`) and the camera image.
 
-- When wanting to create the map, the repo https://github.com/CarmineD8/ros2_navigation must be cloned as a package in the workspace, and then, before running the launch file, run `ros2 launch ros2_navigation mapping.launch.py`. The fixed frame in rviz must be setted to `map`.  
-If you also want to save the map, go into the folder in which you want to save it and run `ros2 run nav2_map_server map_saver_cli -f my_map`, where my_map is the name my map has.  
-The map can be visualized by adding the `/map` topic in rviz.
+| Type | Topic | Message |
+|---|---|---|
+| Subscriber | `/aruco_detections` | `aruco_opencv_msgs/ArucoDetection` |
+| Subscriber | `/odom` | `nav_msgs/Odometry` |
+| Subscriber | `camera/image/compressed` | `sensor_msgs/CompressedImage` |
+| Publisher | `/cmd_vel` | `geometry_msgs/Twist` |
+| Publisher | `camera/image_with_circle` | `sensor_msgs/CompressedImage` |
 
-- Once created a map, I can load it and use it to localize the robot in the environment. To do this, I need to launch `ros2 launch ros2_navigation localization.launch.py` and set in rviz the fixed frame as `map` (if needed relaunch the localization.launch.py).  
-If wanted, I can also visualize in rviz `PoseWithCovariance` to see the localization and `ParticleCloud`. Maybe they will not work at first, but changing few parameters (or re-setting the fixed frame), they should work. Remember to set the topic of `ParticleCloud` as `/particle_cloud` and to set for both topics the `Reliability Policy` to `Best Effort`.
+The default world, `worlds/aruco_boxes.sdf`, contains boxes with ArUco markers (`aruco_box/` model).
 
-- When wanting to navigate in an environment, launch `erl1_simulation.launch.py`, `mapping.launch.py` and `navigate.launch.py`. Then in rviz you can add the map, the cost map (local or global) and the path (local or global). You will see that, using the `2D goal pose` tool to move around the robot, the map will be updated.
+## Lab classes
 
-- When integrating PPDL with ROS2, the following command must be run  
-`(sudo) apt install "ros-jazzy-plansys2-*"`.  
-In our case, it is required also to clone the repo https://github.com/CarmineD8/plansys_interface.
+The package was extended class by class:
 
-- The professor has run the following commands:
-```bash
-ros2 run plansys_interface get_plan
-ros2 run plansys_interface get_plan_and_execute
-ros2 launch plansys_interface distributed.launch.py
+| Step | What was added |
+|---|---|
+| Robot model | URDF/Xacro of a differential-drive robot, visualized in RViz and spawned in Gazebo with a motion plugin |
+| Camera | RGB camera, later replaced by an RGB-D camera (depth image and point cloud) |
+| IMU + EKF | IMU sensor, fused with the wheel odometry through an Extended Kalman Filter (`robot_localization`, `config/ekf.yaml`) |
+| GPS | NavSat sensor |
+| Lidar | 2D laser scanner (`/scan`, point cloud) |
+| ArUco markers | Marker detection with OpenCV (`ros_aruco_opencv`) and Gazebo world with marker boxes |
+| Mapping | 2D map of the environment, built and saved with Nav2 |
+| Localization | Localization on the saved map with a particle filter |
+| Navigation | Autonomous navigation to goals set in RViz, with local and global costmaps and paths |
+| Task planning | PDDL planning integrated with ROS 2 through PlanSys2 |
+
+## Package structure
+
+```
+erl1/
+├── launch/erl1_simulation.launch.py   # Gazebo, robot spawn, ros_gz bridges, EKF, RViz, ArUco tracker
+├── scripts/assignment1.py             # assignment 1 node
+├── urdf/                              # robot model (URDF, Gazebo plugins, materials)
+├── worlds/                            # Gazebo worlds (empty, custom, ArUco boxes)
+├── aruco_box/                         # Gazebo model of a box with ArUco markers
+├── config/ekf.yaml                    # EKF configuration
+├── rviz/                              # RViz configurations
+└── gifs/                              # demos
 ```
 
-- To open a new plansys2 terminal, run `ros2 run plansys2_terminal plansys2_terminal`.  
-By typing `get domain`, the domain will be displayed; by typing `run`, the system will try to solve the problem. The terminal will be closed by typing `quit`.
+## Requirements
 
+- ROS 2 Jazzy with Gazebo Sim and the `ros_gz` packages
+- Course packages, cloned in the same workspace: [meshes](https://github.com/CarmineD8/meshes), [my_opencv_py](https://github.com/CarmineD8/my_opencv_py), [ros2_navigation](https://github.com/CarmineD8/ros2_navigation), [plansys_interface](https://github.com/CarmineD8/plansys_interface)
+- ArUco: [ros_aruco_opencv](https://github.com/fictionlab/ros_aruco_opencv) as a package in the workspace, and [ros2-gazebo-aruco](https://github.com/SaxionMechatronics/ros2-gazebo-aruco) next to the workspace
+- PDDL: `sudo apt install "ros-jazzy-plansys2-*"`
+- Python packages: `requirements.txt`
+
+## Usage
+
+Build the workspace and start the simulation:
+
+```bash
+colcon build
+source install/local_setup.bash
+ros2 launch erl1 erl1_simulation.launch.py
+```
+
+The launch file starts Gazebo with the ArUco world, the robot, the bridges, the EKF, RViz and the ArUco tracker. The assignment node is commented out in the launch file: to run it, uncomment the line that adds `ass_node`.
+
+Mapping, localization and navigation (with the simulation running):
+
+```bash
+ros2 launch ros2_navigation mapping.launch.py         # build the map (RViz fixed frame: map)
+ros2 run nav2_map_server map_saver_cli -f my_map      # save it
+ros2 launch ros2_navigation localization.launch.py    # localize on a saved map
+ros2 launch ros2_navigation navigate.launch.py        # navigate with "2D Goal Pose" in RViz
+```
+
+In RViz, the particle cloud (`/particle_cloud`) and the pose estimate are visible after setting their *Reliability Policy* to *Best Effort*.
+
+PDDL planning with PlanSys2:
+
+```bash
+ros2 launch plansys_interface distributed.launch.py
+ros2 run plansys_interface get_plan_and_execute
+ros2 run plansys2_terminal plansys2_terminal           # "get domain", "run", "quit"
+```
